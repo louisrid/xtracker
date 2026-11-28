@@ -260,7 +260,7 @@ export async function groupReport(source,metric,{force=false,refreshClicks=false
     .filter(h=>ids.has(String(h.id||''))&&Date.parse(h.at||'')>=cutoff&&Number.isFinite(Number(h.views)));
   return {ok:true,id:'GTA',name:'GTA VI',scope:'published-qrts-v1',ready:true,checkedAt:new Date().toISOString(),
     source:source.source,sourceVerifiedAt:source.at,sourceStale:!!source.warning,cached:source.cached,warning:source.warning||'',
-    publishers,summary:summarisePlacements(source.rows),activity:shortIo.links.filter(p=>p.attributed&&!p.sharedTracking).flatMap(p=>(p.dailyClicks||[]).map(d=>({...d,code:p.code,postId:xPost(p.postUrl)?.id}))),history,clickTracking:true,shortIo,clickTrackingReason:'All-time human clicks are separate from verified post-publication clicks; each link is counted once.',
+    publishers,summary:summarisePlacements(source.rows),activity:shortIo.links.filter(p=>p.attributed&&!p.sharedTracking).flatMap(p=>(p.dailyClicks||[]).map(d=>({...d,code:p.code,trackingUrl:p.trackingUrl,postId:xPost(p.postUrl)?.id}))),history,clickTracking:true,shortIo,clickTrackingReason:'All-time human clicks are separate from verified post-publication clicks; each link is counted once.',
     metricLastSuccessfulAt:xStatus.lastSuccessfulAt,intervalHours:2,
     xStatus,metricErrors:xStatus.errors};
 }

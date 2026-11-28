@@ -1695,7 +1695,7 @@ route(location.hash.slice(1),false);load();if(!state.ofLoading)loadOfReport();
 // the existing refresh and editor actions. It adds no new requests or data writes.
 window.XTrackerApp=Object.freeze({
   dashboard:()=>({placements:state.placements,campaigns:state.campaigns,history:state.history,activity:state.activity,
-    activityReady:state.activityReady,trackingReady:state.trackingReady,adminConfigured:state.adminConfigured,
+    activityReady:state.activityReady,trackingReady:state.trackingReady,checkedAt:state.dashboardMeta?.checkedAt,adminConfigured:state.adminConfigured,
     loading:state.loading,loadError:state.loadError,settled:state.initialLoadSettled,raw:state.dashboardMeta||null}),
   of:()=>({report:state.ofCampaign||null,error:state.ofError||'',loading:Boolean(state.ofLoading)}),
   gta:()=>({report:gtaState.report,error:gtaState.error,loading:Boolean(gtaState.loading),refreshing:gtaState.refreshing}),

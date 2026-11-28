@@ -239,6 +239,10 @@ function gtaCampaign(data,group='qrts'){
   },{
     allTimeHumanClicks:num(entry.shortIo?.total),
     postPublicationClicks:num(entry.shortIo?.postPublicationTotal),
+    clickHistory:Array.isArray(entry.activity)?entry.activity:null,
+    clickHistoryCheckedAt:entry.checkedAt||null,
+    clickHistoryReady:Array.isArray(entry.activity),
+    clickLinkCoverage:(entry.shortIo?.links||[]).map(p=>({code:p.code,trackingUrl:p.trackingUrl,posted:p.posted,attributed:p.attributed,publicationAt:p.publicationAt,publicationStale:p.publicationStale,clickError:p.clickError,attributionError:p.attributionError})),
     sourceStale:!!entry.sourceStale,
     xMetricErrors:(entry.xStatus?.errors||[]).length,
     quotedOriginals:group==='qrts'?data.quotedOriginals||null:group==='mandy'?entry.quotedOriginals||null:null,
@@ -254,6 +258,7 @@ function ofCampaign(data){
     reposts:num(p.xShares??p.reposts),replies:num(p.xComments??p.replies),clicks:num(p.clicks)}));
   const d=normalCampaign('of-terms','OF Terms','article',rows,{source:'OF_REPORT',at:data.checkedAt},{
     trackedClicks:sum(rows,p=>p.clicks),
+    clickHistory:Array.isArray(data.activity)?data.activity:null,clickHistoryCheckedAt:data.checkedAt||null,clickHistoryReady:Array.isArray(data.activity),
     sourceNote:'OF Terms post clicks are recorded by the existing OF reporting feed. Do not mix them with Short.io click counts.'
   });
   return d;
@@ -327,13 +332,14 @@ function dashboardCampaigns(data){
   const rows=data.placements.map(p=>({...p,views:num(p.xViews),likes:num(p.xLikes),
     reposts:num(p.xShares),replies:num(p.xComments),clicks:num(p.clicks)}));
   const codes=new Set(rows.map(p=>String(p.code||'')).filter(Boolean));
-  const cutoff=Date.now()-6*24*60*60*1000;
+  const cutoff=Date.now()-21*24*60*60*1000;
   const history=(Array.isArray(data.metricHistory)?data.metricHistory:[])
     .filter(h=>codes.has(String(h.code||''))&&Date.parse(h.at||'')>=cutoff&&num(h.views)!==null);
   const clickHistory=(Array.isArray(data.clickActivity)?data.clickActivity:[])
     .filter(h=>codes.has(String(h.code||''))&&Date.parse(String(h.date||'')+'T12:00:00Z')>=cutoff&&num(h.clicks)!==null);
   const general=normalCampaign('x-articles','X Articles','article',rows,{source:'ARTICLE_TRACKER',at:data.sheetVerifiedAt},{
-    trackedClicks:sum(rows,p=>p.clicks),history,clickHistory,
+    trackedClicks:sum(rows,p=>p.clicks),history,clickHistory:data.trackingReady===false?null:clickHistory,
+    clickHistoryCheckedAt:data.checkedAt||null,clickHistoryReady:Array.isArray(data.clickActivity)&&data.trackingReady!==false,
     spendPeriod:'All-time across all tracked X Article placements'
   });
   const knownCampaigns=(data.campaigns||[]).filter(c=>c&&c.id).map(c=>{
@@ -423,7 +429,7 @@ export default async function handler(request){
   const store=overviewStore();
   let saved=null;
   try{saved=await store.get('latest',{type:'json'});}catch{}
-  if(!force&&saved?.data?.ok&&Date.now()-Date.parse(saved.at)<OVERVIEW_CACHE_TTL){
+  if(!force&&saved?.data?.ok&&saved.data.clickHistoryVersion===2&&Date.now()-Date.parse(saved.at)<OVERVIEW_CACHE_TTL){
     return Response.json({...withReportedSpend(saved.data),cached:true,cacheAgeMs:Math.max(0,Date.now()-Date.parse(saved.at))},{
       headers:{'cache-control':'no-store','x-content-type-options':'nosniff'}
     });
@@ -431,11 +437,18 @@ export default async function handler(request){
   try{
     const parts=await readReportParts(request.url,{force,reuseReports:new URL(request.url).searchParams.has('reuse')});
     // A failed source can change RT attribution and totals. Retain the coherent prior snapshot rather than cache a degraded replacement.
+    const result={...withReportedSpend(assembleCampaignOverview(parts)),clickHistoryVersion:2};
+    // A failed unrelated provider must not roll back verified clicks or current placements.
+    // Keep the failed source's own canonical groups; update healthy groups from the new snapshot.
     if(saved?.data?.ok&&Object.values(parts).some(part=>part.error)){
-      const errors=Object.entries(parts).filter(([,part])=>part.error).map(([name,part])=>name+': '+diagnostic(part.error));
-      return Response.json({...withReportedSpend(saved.data),cached:true,stale:true,errors:[...new Set([...(saved.data.errors||[]),...errors])]}, {headers:{'cache-control':'no-store','x-content-type-options':'nosniff'}});
+      const old=new Map(saved.data.campaigns.map(c=>[c.id,c]));
+      const owners={'gta-qrts':['gta'],'gta-originals':['gta'],'gta-mandy':['gta'],'gta-instagram':['gta'],'x-articles':['dashboard'],'of-terms':['of'],'article-rts':['articleRts','articleOriginals'],'guru-rts':['articleRts','articleOriginals','boosts']};
+      const failed=c=>(owners[c.id]||[]).some(k=>parts[k]?.error)||c.unavailable||c.sourceStale;
+      result.campaigns=result.campaigns.map(c=>failed(c)&&old.has(c.id)?{...old.get(c.id),sourceStale:true,dataWarning:'Source unavailable; showing last verified campaign data.'}:c);
+      for(const c of old.values())if(!result.campaigns.some(x=>x.id===c.id)&&failed(c))result.campaigns.push({...c,sourceStale:true});
+      result.stale=true;
     }
-    const result=withReportedSpend(assembleCampaignOverview(parts));
+    // Retain coherent verified groups across independent source failures.
     try{await store.setJSON('latest',{at:new Date().toISOString(),data:result});}catch{}
     return Response.json({...result,cached:false},{headers:{'cache-control':'no-store','x-content-type-options':'nosniff'}});
   }catch{

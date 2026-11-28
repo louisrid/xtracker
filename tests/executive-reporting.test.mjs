@@ -254,3 +254,19 @@ test('Discord period scope is visible and both pages use identical verified memb
 });
 
 test('allocation stays in its original week after payment, uses current source cost and excludes unrelated unpaid rows',()=>{const r={campaign:'GTAQ2',publisher:'arkavx',code:'p',cost:155,paid:false,planned:true,plannedAt:'2026-11-24'};const paid={...r,paid:true,planned:false,paidAt:'2026-12-02'};for(const row of [r,paid]){const entry=C.financeEntry(row);assert.equal(C.financeSpend([entry,entry]).value,155);assert.equal(C.financeSpend([entry],{from:'2026-11-23',to:'2026-11-29'}).value,155);assert.equal(C.financeSpend([entry],{from:'2026-11-30',to:'2026-12-06'}).value,0);}assert.equal(C.financeEntry({...r,campaign:'OTHER'}),null);assert.equal(C.weekStart(C.londonDay('2026-07-05T23:00:00Z')),'2026-07-06');assert.equal(C.weekStart(C.londonDay('2026-07-05T22:59:59Z')),'2026-06-29');});
+
+test('daily clicks reconcile stale adapter with fresh overview by link and day, without duplicates',()=>{
+ const date='2026-11-27',post='https://x.com/publisher/status/'+String((BigInt(Date.parse(date+'T10:00:00Z')-1288834974657)<<22n)+1n),link='https://createmyai.app/test';
+ const r={code:'new-code',campaign:'GTAM',publisher:'Publisher',paid:true,posted:true,postUrl:post,trackingUrl:link,cost:35,clicks:16};
+ const old={code:'old-code',trackingUrl:link,date,clicks:4,end:date+'T12:00:00.000Z',at:date+'T12:01:00.000Z'};
+ const fresh={...old,clicks:16,end:date+'T23:59:59.999Z',at:'2026-11-28T00:03:00.000Z'};
+ const ov={campaigns:[campaign('gta-mandy',[r],{clickHistory:[fresh],clickHistoryReady:true,clickHistoryCheckedAt:fresh.at})]};
+ const a=app(ov,{gta:{mandy:{activity:[old,fresh]}}});
+ const series=a.dashboardClickSources()[0][1];assert.equal(series.find(p=>p.week===date).value,16);assert.equal(a.periodTotals(date,date).clicks.value,16);
+});
+test('dated event history chooses newest snapshot rather than adding both or synthesising future zero days',()=>{
+ const date='2026-11-27',r={code:'A01-P01',paid:true,posted:true,cost:50,clicks:8,postUrl:url(1)};
+ const ov={campaigns:[campaign('x-articles',[r],{trackedClicks:8,clickHistoryReady:true,clickHistoryCheckedAt:'2026-11-28T01:00:00Z',clickHistory:[{code:r.code,date,clicks:8}]})]};
+ const a=app(ov,{dashboard:{activityReady:true,checkedAt:'2026-11-27T12:00:00Z',activity:[{code:r.code,date,clicks:2}]}});
+ assert.equal(a.dashboardClickSources()[1][1].find(p=>p.week===date).value,8);
+});
