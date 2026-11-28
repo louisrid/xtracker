@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {chromium} from 'playwright';
 const base='https://elegant-swan-98c20a.netlify.app',sleep=ms=>new Promise(r=>setTimeout(r,ms));
-let ready=false;for(let i=0;i<45;i++){try{const r=await fetch(base+'/?qa='+Date.now(),{cache:'no-store',signal:AbortSignal.timeout(10000)});if((await r.text()).includes('20261128-verified-exposure-v68')){ready=true;break}}catch{}await sleep(3000)}
+let ready=false;for(let i=0;i<45;i++){try{const r=await fetch(base+'/?qa='+Date.now(),{cache:'no-store',signal:AbortSignal.timeout(10000)});if((await r.text()).includes('20261128-fresh-exposure-v69')){ready=true;break}}catch{}await sleep(3000)}
 assert.ok(ready,'production version published');
 const browser=await chromium.launch({headless:true,executablePath:process.env.CHROME_BIN||undefined,args:['--no-sandbox']});
 try{
@@ -9,7 +9,7 @@ try{
  await ctx.route('**/*',r=>{const u=new URL(r.request().url());return (u.origin===base&&!/^\/(?:r|s|of|p)\//.test(u.pathname))||u.hostname==='fonts.googleapis.com'||u.hostname.endsWith('gstatic.com')?r.continue():r.abort();});
  const page=await ctx.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));
  await page.goto(base+'/#home',{waitUntil:'domcontentloaded'});
- await page.waitForFunction(()=>window.XTrackerCampaignReporting?.getData()?.viewHistoryVersion===1,{},{timeout:120000});
+ await page.waitForFunction(()=>window.XTrackerCampaignReporting?.getData()?.viewHistoryVersion===2,{},{timeout:120000});
  const ov=await page.evaluate(()=>window.XTrackerCampaignReporting.getData());
  const pick=id=>ov.campaigns.find(c=>c.id===id);
  // Independent accounting of underlying verified rows, including original RT groups.
@@ -22,7 +22,7 @@ try{
  }return {views:[...m.values()].reduce((n,r)=>n+r.v,0),posts:m.size};};
  const articles=[pick('x-articles'),pick('article-rts')],gta=[pick('gta-qrts'),pick('gta-originals'),pick('gta-mandy')],of=[pick('of-terms')],guru=[pick('guru-rts')];
  const expected={home:ledger([...articles,...gta,...of,...guru]),'x-articles':ledger(articles),'gta-vi':ledger(gta),'viral-qrts':ledger([pick('gta-mandy')]),'of-terms':ledger(of),'guru-promotion':ledger(guru),'x-articles/rts':ledger([pick('article-rts')])};
- console.log('LIVE exposure independent '+JSON.stringify({expected,articleDirect:ledger([articles[0]]),rtOriginal:ledger([articles[1]]),rtGroups:articles[1]?.articleRtGroups?.length,rtHistory:articles[1]?.history?.length,ofHistory:of[0]?.history?.length,guruHistory:guru[0]?.history?.length}));
+ console.log('LIVE exposure independent '+JSON.stringify({expected,articleDirect:ledger([articles[0]]),rtOriginal:ledger([articles[1]]),rtGroups:articles[1]?.articleRtGroups?.length,guruRtGroups:guru[0]?.articleRtGroups?.map(g=>({id:g.postId,views:g.views,paid:g.paidCount,posted:g.postedCount})),guruRtLinkedSpend:guru[0]?.articleRtSummary?.linkedPaidSpendKnown,articleRtUnlinkedSpend:articles[1]?.articleRtSummary?.unlinkedPaidSpendKnown,rtHistory:articles[1]?.history?.length,ofHistory:of[0]?.history?.length,guruHistory:guru[0]?.history?.length}));
  for(const [route,amount] of Object.entries(expected)){
   await page.evaluate(route=>location.hash=route,route);
   const selector=route==='home'?'[data-view="all-time"]':'#fvPage>.fv-kpi-periods [data-period="all-time"]';

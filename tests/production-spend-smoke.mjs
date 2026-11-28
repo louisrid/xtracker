@@ -6,7 +6,7 @@ const base='https://elegant-swan-98c20a.netlify.app';
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 let ready=false;
 for(let i=0;i<25;i++){
- try{const r=await fetch(base+'/?qa='+Date.now(),{cache:'no-store',signal:AbortSignal.timeout(12000)});ready=r.ok&&(await r.text()).includes('20261128-verified-exposure-v68');if(ready)break;}catch{}
+ try{const r=await fetch(base+'/?qa='+Date.now(),{cache:'no-store',signal:AbortSignal.timeout(12000)});ready=r.ok&&(await r.text()).includes('20261128-fresh-exposure-v69');if(ready)break;}catch{}
  await sleep(3000);
 }
 assert.ok(ready,'Latest production HTML must be published before checking spend');
@@ -55,7 +55,9 @@ try{
  const read=async(period)=>{
   await page.locator('[data-view="'+period+'"]').click();
   await page.waitForFunction(p=>document.querySelector('[data-view="'+p+'"]')?.getAttribute('aria-pressed')==='true',period);
-  return page.locator('#fvPage>.fv-strip .fv-metric').filter({has:page.locator('.fv-metric-label',{hasText:'Spend'})}).locator('.fv-metric-value .fv-num').innerText({timeout:15000});
+  const number=page.locator('#fvPage>.fv-strip .fv-metric').filter({has:page.locator('.fv-metric-label',{hasText:'Spend'})}).locator('.fv-metric-value .fv-num');
+  await page.waitForFunction(()=>!document.querySelector('#fvPage').classList.contains('is-kpi-refreshing')&&[...document.querySelectorAll('#fvPage>.fv-strip .fv-metric')].some(e=>e.querySelector('.fv-metric-label')?.textContent.trim()==='Spend'&&/^\$[\d,.]+[KM]?$/.test(e.querySelector('.fv-metric-value .fv-num')?.innerText||'')),{},{timeout:240000});
+  return number.innerText({timeout:15000});
  };
  const check=async(label)=>{
   await page.waitForFunction(()=>!window.XTrackerCampaignReporting.status().loading&&window.XTrackerCampaignReporting.getData()?.campaigns?.filter(c=>c.id.startsWith('gta-')).every(c=>typeof c.spendKnown==='number'),{},{timeout:100000});

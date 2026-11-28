@@ -104,7 +104,7 @@ export function parseOriginalXSnapshot(data,expectedId,at){
    retained on provider failures; source URLs come exclusively from the Sheet. */
 export async function readArticleOriginalMetrics(rows=[],{
   fetcher=fetch,store=getStore({name:'fanvue-article-rt-original-metrics-v1',consistency:'strong'}),
-  now=Date.now(),force=false
+  now=Date.now(),force=false,verifiedRows=[]
 }={}){
   const targets=new Map();
   for(const p of rows){
@@ -117,6 +117,17 @@ export async function readArticleOriginalMetrics(rows=[],{
   const history=new Map((saved?.history||[]).filter(h=>Date.parse(h.at)>=now-91*86400000).map(h=>[h.postId+'|'+Finance.londonDay(h.at),h]));
   const remember=m=>{if(!m?.postId||!m.at||num(m.views)===null)return;const key=m.postId+'|'+Finance.londonDay(m.at),prior=history.get(key);if(!prior||Date.parse(m.at)>Date.parse(prior.at))history.set(key,{id:m.postId,postId:m.postId,at:m.at,views:m.views});};
   for(const m of Object.values(metrics))remember(m);
+  // Persist provider readings already obtained by the other campaign refreshes.
+  // The same original need not be requested again merely because it has paid RTs.
+  for(const p of verifiedRows){
+    const id=xPost(p.sourcePostUrl||p.postUrl),target=targets.get(id),at=Date.parse(p.metricAt||'');
+    if(!target||p.sourceViews!==true||!Number.isFinite(at)||num(p.sourceOriginalViews)===null)continue;
+    const value={postId:id,postUrl:target.postUrl,views:num(p.sourceOriginalViews),likes:num(p.likes),comments:num(p.replies),shares:num(p.reposts),at:p.metricAt,source:p.metricSource||'VERIFIED_X'};
+    remember(value);
+    if(!metrics[id]||at>=(Date.parse(metrics[id].at||'')||0)){
+      metrics[id]={...value,lastAttemptAt:p.metricAt};
+    }
+  }
   const entries=[...targets.values()];
   for(let offset=0;offset<entries.length;offset+=4){
     await Promise.all(entries.slice(offset,offset+4).map(async target=>{
@@ -274,9 +285,11 @@ function boostsCampaign(data,articleRows=[]){
   const groups=new Map(grouped.originals.map(g=>[g.postId,g]));
   const promoted=data.tweets.map(t=>{
     const postUrl='https://x.com/'+t.handle+'/status/'+t.id,rt=groups.get(String(t.id));
+    const useRt=rt&&num(rt.views)!==null&&(num(t.views)===null||(Date.parse(rt.metricAt||'')||0)>(Date.parse(t.at||'')||0));
+    const best=useRt?rt:t;
     return {...t,publisher:t.name||t.handle,postUrl,
-      posted:true,paid:t.spend!==null&&t.spend!==undefined,cost:num(t.spend),views:num(t.views),likes:num(t.likes),
-      reposts:num(t.reposts),replies:num(t.replies),metricAt:t.at||null,
+      posted:true,paid:t.spend!==null&&t.spend!==undefined,cost:num(t.spend),views:num(best.views),likes:num(best.likes),
+      reposts:num(best.reposts),replies:num(best.replies),metricAt:(useRt?rt.metricAt:t.at)||null,
       linkedRtPaidSpend:rt?.paidSpendKnown??null,linkedRtPaidCount:rt?.paidCount??0};
   });
   // Other posts by the same Guru accounts that were promoted with paid RTs (not in the boosts feed).
@@ -423,9 +436,11 @@ export async function readReportParts(origin,{fetcher=fetch,readRts=readArticleR
   // Only request provider metrics for the unmonitored original post IDs.
   const previous=enrichArticleRtMetrics(rows,{
     gta:parts.gta?.data,of:parts.of?.data,boosts:parts.boosts?.data,dashboard:parts.dashboard?.data});
-  const missing=previous.filter(p=>xPost(p.sourcePostUrl||p.postUrl)&&!p.sourceViews);
-  if(missing.length){
-    try{parts.articleOriginals={data:await readArticleOriginalMetrics(missing,{fetcher,force})};}
+  const linked=previous.filter(p=>p.paid===true&&xPost(p.sourcePostUrl||p.postUrl));
+  // Read the original history even when every current counter came from Guru/X.
+  // Otherwise a later refresh can silently erase the original's historical coverage.
+  if(linked.length){
+    try{parts.articleOriginals={data:await readArticleOriginalMetrics(linked,{fetcher,force,verifiedRows:linked})};}
     catch(error){parts.articleOriginals={error:diagnostic(error)};}
   }
   return parts;
@@ -441,7 +456,7 @@ export default async function handler(request){
   const store=overviewStore();
   let saved=null;
   try{saved=await store.get('latest',{type:'json'});}catch{}
-  if(!force&&saved?.data?.ok&&saved.data.clickHistoryVersion===2&&saved.data.viewHistoryVersion===1&&Date.now()-Date.parse(saved.at)<OVERVIEW_CACHE_TTL){
+  if(!force&&saved?.data?.ok&&saved.data.clickHistoryVersion===2&&saved.data.viewHistoryVersion===2&&Date.now()-Date.parse(saved.at)<OVERVIEW_CACHE_TTL){
     return Response.json({...withReportedSpend(saved.data),cached:true,cacheAgeMs:Math.max(0,Date.now()-Date.parse(saved.at))},{
       headers:{'cache-control':'no-store','x-content-type-options':'nosniff'}
     });
@@ -449,7 +464,7 @@ export default async function handler(request){
   try{
     const parts=await readReportParts(request.url,{force,reuseReports:new URL(request.url).searchParams.has('reuse')});
     // A failed source can change RT attribution and totals. Retain the coherent prior snapshot rather than cache a degraded replacement.
-    const result={...withReportedSpend(assembleCampaignOverview(parts)),clickHistoryVersion:2,viewHistoryVersion:1};
+    const result={...withReportedSpend(assembleCampaignOverview(parts)),clickHistoryVersion:2,viewHistoryVersion:2};
     // A failed unrelated provider must not roll back verified clicks or current placements.
     // Keep the failed source's own canonical groups; update healthy groups from the new snapshot.
     if(saved?.data?.ok&&Object.values(parts).some(part=>part.error)){

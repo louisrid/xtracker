@@ -4,7 +4,7 @@ import {readFileSync} from 'node:fs';
 import ExcelJS from 'exceljs';
 import {parseQuotedPost} from '../netlify/lib/gta-x-metrics.mjs';
 import {summariseQuotedOriginals} from '../netlify/lib/quoted-originals.mjs';
-import {parseArticleRtWorkbook,assembleCampaignOverview,enrichArticleRtMetrics,readReportParts} from '../netlify/functions/campaign-overview.mjs';
+import {parseArticleRtWorkbook,assembleCampaignOverview,enrichArticleRtMetrics,readReportParts,readArticleOriginalMetrics} from '../netlify/functions/campaign-overview.mjs';
 
 const original={id:'2122103967551295552',url:'https://x.com/iluv_papi/status/2122103967551295552',
   author:{screen_name:'iluv_papi'},views:19906,likes:430,retweets:80,replies:12};
@@ -215,4 +215,17 @@ test('completed refresh reuses freshly fetched reports but still rereads Article
  const calls=[];let force;
  await readReportParts('https://example.netlify.app/',{force:true,reuseReports:true,fetcher:async u=>{calls.push(String(u));return Response.json({ok:true});},readRts:async o=>{force=o.force;return {rows:[]};}});
  assert.equal(calls.length,4);assert.equal(force,true);assert.ok(calls.some(u=>u.includes('gta-report?reuse=1')));assert.ok(calls.every(u=>!u.includes('refresh=1')));
+});
+
+test('original RT history survives a refresh when another source supplies the newest exact-post reading',async()=>{
+ const postUrl='https://x.com/example/status/123';
+ const prior={postId:'123',postUrl,views:100,at:'2026-11-24T12:00:00Z',lastAttemptAt:'2026-11-24T12:00:00Z'};
+ let data={metrics:{'123':prior},history:[{id:'123',postId:'123',views:100,at:prior.at}]},requests=0;
+ const store={get:async()=>data,setJSON:async(key,value)=>{data=value;}};
+ const row={paid:true,posted:false,postUrl,sourcePostUrl:postUrl,sourceViews:true,sourceOriginalViews:450,metricAt:'2026-11-28T12:00:00Z',metricSource:'X_RTS'};
+ const result=await readArticleOriginalMetrics([row],{store,now:Date.parse('2026-11-28T12:00:30Z'),force:true,verifiedRows:[row],fetcher:async()=>{requests++;throw Error('unnecessary request');}});
+ assert.equal(requests,0);assert.equal(result.metrics['123'].views,450);assert.equal(result.history.length,2);
+ assert.equal(row.posted,false);
+ const assembled=assembleCampaignOverview({articleRts:{data:{rows:[row],source:'GOOGLE_SHEETS_LIVE'}},boosts:{data:{ok:true,tweets:[{id:'123',handle:'example',views:100,at:prior.at}]}},articleOriginals:{data:result}});
+ assert.equal(assembled.campaigns.find(c=>c.id==='guru-rts').views,450);
 });
