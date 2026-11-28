@@ -114,6 +114,9 @@ export async function readArticleOriginalMetrics(rows=[],{
   let saved=null;
   try{saved=await store.get('latest',{type:'json'});}catch{}
   const metrics={...(saved?.metrics||{})},nowISO=new Date(now).toISOString(),errors=[];
+  const history=new Map((saved?.history||[]).filter(h=>Date.parse(h.at)>=now-91*86400000).map(h=>[h.postId+'|'+Finance.londonDay(h.at),h]));
+  const remember=m=>{if(!m?.postId||!m.at||num(m.views)===null)return;const key=m.postId+'|'+Finance.londonDay(m.at),prior=history.get(key);if(!prior||Date.parse(m.at)>Date.parse(prior.at))history.set(key,{id:m.postId,postId:m.postId,at:m.at,views:m.views});};
+  for(const m of Object.values(metrics))remember(m);
   const entries=[...targets.values()];
   for(let offset=0;offset<entries.length;offset+=4){
     await Promise.all(entries.slice(offset,offset+4).map(async target=>{
@@ -128,7 +131,7 @@ export async function readArticleOriginalMetrics(rows=[],{
         const value=parseOriginalXSnapshot(await response.json(),target.id,nowISO);
         if(prior&&['views','likes','comments','shares'].some(k=>value[k]===0&&Number(prior[k])>0))
           throw Error('X provider returned an invalid zero reset');
-        metrics[target.id]={...value,postUrl:target.postUrl,source:'FXTWITTER',lastAttemptAt:nowISO};
+        metrics[target.id]={...value,postUrl:target.postUrl,source:'FXTWITTER',lastAttemptAt:nowISO};remember(metrics[target.id]);
       }catch(error){
         errors.push(target.id);
         metrics[target.id]={...(prior||{}),postUrl:target.postUrl,lastAttemptAt:nowISO,
@@ -136,7 +139,7 @@ export async function readArticleOriginalMetrics(rows=[],{
       }
     }));
   }
-  const result={metrics,at:nowISO,source:'FXTWITTER',errors};
+  const result={metrics,history:[...history.values()],at:nowISO,source:'FXTWITTER',errors};
   try{await store.setJSON('latest',result);}catch{}
   return result;
 }
@@ -239,6 +242,7 @@ function gtaCampaign(data,group='qrts'){
   },{
     allTimeHumanClicks:num(entry.shortIo?.total),
     postPublicationClicks:num(entry.shortIo?.postPublicationTotal),
+    history:Array.isArray(entry.history)?entry.history:[],
     clickHistory:Array.isArray(entry.activity)?entry.activity:null,
     clickHistoryCheckedAt:entry.checkedAt||null,
     clickHistoryReady:Array.isArray(entry.activity),
@@ -257,7 +261,7 @@ function ofCampaign(data){
   const rows=(data.publishers||[]).map(p=>({...p,views:num(p.xViews??p.views),likes:num(p.xLikes??p.likes),
     reposts:num(p.xShares??p.reposts),replies:num(p.xComments??p.replies),clicks:num(p.clicks)}));
   const d=normalCampaign('of-terms','OF Terms','article',rows,{source:'OF_REPORT',at:data.checkedAt},{
-    trackedClicks:sum(rows,p=>p.clicks),
+    trackedClicks:sum(rows,p=>p.clicks),history:data.history||[],
     clickHistory:Array.isArray(data.activity)?data.activity:null,clickHistoryCheckedAt:data.checkedAt||null,clickHistoryReady:Array.isArray(data.activity),
     sourceNote:'OF Terms post clicks are recorded by the existing OF reporting feed. Do not mix them with Short.io click counts.'
   });
@@ -299,7 +303,7 @@ function boostsCampaign(data,articleRows=[]){
 export function enrichArticleRtMetrics(articleRows=[],feeds={}){
   const known=new Map();
   const candidates=[];
-  for(const p of [...(feeds.gta?.publishers||[]),...(feeds.gta?.originals?.publishers||[])])
+  for(const p of [...(feeds.gta?.publishers||[]),...(feeds.gta?.originals?.publishers||[]),...(feeds.gta?.mandy?.publishers||[])])
     candidates.push({p,source:'GTA_X',at:p.metricAt,views:p.views,likes:p.likes,reposts:p.reposts,replies:p.replies});
   for(const p of feeds.of?.publishers||[])
     candidates.push({p,source:'OF_X',at:p.xUpdated||p.metricLastVerifiedAt,views:p.xViews??p.views,likes:p.xLikes??p.likes,reposts:p.xShares??p.reposts,replies:p.xComments??p.replies});
@@ -365,6 +369,11 @@ export function assembleCampaignOverview(sources){
   const isGuruRt=p=>guruHandles.has(handleOf(p.sourcePostUrl||p.postUrl).toLowerCase());
   const guruRts=allArticleRts.filter(isGuruRt),linkedArticleRts=allArticleRts.filter(p=>!isGuruRt(p));
   const rtGroups=groupArticleRtSpend(linkedArticleRts);
+  const originalsHistory=[...(src.articleOriginals?.data?.history||[]),
+    ...(gta?.history||[]),...(gta?.originals?.history||[]),...(gta?.mandy?.history||[]),
+    ...(dashboard?.metricHistory||[]),...(of?.history||[]),
+    ...(boosts?.tweets||[]).flatMap(t=>(t.history||[]).map(h=>({...h,id:t.id})))];
+  const historyFor=ids=>originalsHistory.map(h=>({...h,id:String(h.postId||h.id||'')})).filter(h=>ids.has(h.id)&&num(h.views)!==null&&h.at);
   const rtCampaign=normalCampaign('article-rts','X Article Boosts','rt',linkedArticleRts,
     {source:article?.source||'UNAVAILABLE',at:article?.at,warning:article?.warning,error:article?.error},{
       views:rtGroups.summary.originalViewsKnown,
@@ -375,13 +384,16 @@ export function assembleCampaignOverview(sources){
       engagementRate:rtGroups.summary.originalEngagementRate,
       viewScope:'ORIGINAL_X_POSTS',originalsWithViews:rtGroups.summary.originalsWithViews,
       originalPosts:rtGroups.summary.originalPosts,articleRtGroups:rtGroups.originals,
+      history:historyFor(new Set(rtGroups.originals.map(g=>g.postId))),
       articleRtUnlinked:rtGroups.unlinked,articleRtSummary:rtGroups.summary,
       trackingWarning:rtGroups.summary.unlinkedPaidCount?
         rtGroups.summary.unlinkedPaidCount+' paid RT entries have no original X post URL; their costs are retained but cannot be assigned to an original post.':null,
       sourceNote:'Original X post views are measured automatically; these are NOT individual paid retweet impressions. Individual RTs need their own X post URL to measure impressions separately.'
     });
+  const guruCampaign=boostsCampaign(boosts,guruRts);
+  guruCampaign.history=historyFor(new Set((guruCampaign.rows||[]).map(r=>String(r.id||''))));
   const campaigns=[
-    gtaCampaign(gta,'qrts'),gtaCampaign(gta,'originals'),...[gtaCampaign(gta,'mandy'),gtaCampaign(gta,'instagram')].filter(Boolean),ofCampaign(of),boostsCampaign(boosts,guruRts),
+    gtaCampaign(gta,'qrts'),gtaCampaign(gta,'originals'),...[gtaCampaign(gta,'mandy'),gtaCampaign(gta,'instagram')].filter(Boolean),ofCampaign(of),guruCampaign,
     rtCampaign,
     ...dashboardCampaigns(dashboard),
     {...normalCampaign('ai-harness','AI Harness','planned',[],{source:'NOT_CONNECTED',error:'No live campaign-specific feed linked'}),unavailable:true},
@@ -429,7 +441,7 @@ export default async function handler(request){
   const store=overviewStore();
   let saved=null;
   try{saved=await store.get('latest',{type:'json'});}catch{}
-  if(!force&&saved?.data?.ok&&saved.data.clickHistoryVersion===2&&Date.now()-Date.parse(saved.at)<OVERVIEW_CACHE_TTL){
+  if(!force&&saved?.data?.ok&&saved.data.clickHistoryVersion===2&&saved.data.viewHistoryVersion===1&&Date.now()-Date.parse(saved.at)<OVERVIEW_CACHE_TTL){
     return Response.json({...withReportedSpend(saved.data),cached:true,cacheAgeMs:Math.max(0,Date.now()-Date.parse(saved.at))},{
       headers:{'cache-control':'no-store','x-content-type-options':'nosniff'}
     });
@@ -437,7 +449,7 @@ export default async function handler(request){
   try{
     const parts=await readReportParts(request.url,{force,reuseReports:new URL(request.url).searchParams.has('reuse')});
     // A failed source can change RT attribution and totals. Retain the coherent prior snapshot rather than cache a degraded replacement.
-    const result={...withReportedSpend(assembleCampaignOverview(parts)),clickHistoryVersion:2};
+    const result={...withReportedSpend(assembleCampaignOverview(parts)),clickHistoryVersion:2,viewHistoryVersion:1};
     // A failed unrelated provider must not roll back verified clicks or current placements.
     // Keep the failed source's own canonical groups; update healthy groups from the new snapshot.
     if(saved?.data?.ok&&Object.values(parts).some(part=>part.error)){

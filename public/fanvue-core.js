@@ -170,6 +170,35 @@
     return {total,gained};
   }
 
+  // Within-period increases between verified readings are real, even if no
+  // reading exists on every intervening day. Do not assign them to single days.
+  function periodViewMetric(rows,from,to,{born=()=>null}={}){
+    const by=new Map();
+    for(const r of rows||[]){
+      const id=String(r.id||''),at=Date.parse(r.at||''),day=londonDay(at),v=num(r.views);
+      if(!id||!day||!Number.isFinite(at)||v===null||v<0||day>to)continue;
+      if(!by.has(id))by.set(id,new Map());
+      const days=by.get(id),prior=days.get(day);
+      if(!prior||at>prior.at)days.set(day,{at,day,v});
+    }
+    let total=0,measured=0,missing=0;
+    for(const [id,days] of by){
+      const sorted=[...days.values()].sort((a,b)=>a.at-b.at);
+      const inRange=sorted.filter(r=>r.day>=from&&r.day<=to);
+      if(!inRange.length){missing++;continue;}
+      const first=inRange[0],last=inRange.at(-1),prior=sorted.filter(r=>r.day<from).at(-1);
+      const bornAt=born(id),published=bornAt?londonDay(bornAt):'';
+      let base=null;
+      // A prior-day closing reading is the existing daily reporting convention.
+      if(prior&&prior.day===addDays(from,-1))base=prior.v;
+      else if(published&&published>=from&&published<=first.day)base=0;
+      else if(inRange.length>1){base=first.v;missing++;}
+      if(base===null){missing++;continue;}
+      total+=Math.max(0,last.v-base);measured++;
+    }
+    return measured?M.partial(total,'Verified view gains within the UK reporting window, including measured increases between readings within the period. Includes organic exposure; no lifetime backfill or fabricated daily attribution.',{measured,missing}):M.na('No verified view gains for this period.');
+  }
+
   /* Discord membership: point-in-time snapshots, never summed. End members is the
      last snapshot in the week; net growth needs the previous week's last snapshot. */
   function memberWeeks(history,now=Date.now()){
@@ -289,6 +318,14 @@
     if(missing.length)return M.partial(total,(label?label+': ':'')+'known subtotal. '+missing.map(p=>p.reason).filter(Boolean).join(' '));
     return M.value(total);
   }
+  // Include originals amplified by verified published paid RTs, once per original.
+  // Organic exposure is included; individual reposter impressions are not known.
+  function rtOriginalRows(c){
+    const groups=c?.articleRtGroups;
+    if(Array.isArray(groups))return groups.filter(g=>g.paidCount>0&&g.postedCount>0&&g.postId).map(g=>({postUrl:g.postUrl,posted:true,views:g.views,metricAt:g.metricAt}));
+    return (c?.rows||[]).filter(r=>r.paid===true&&r.posted===true&&r.sourceViews===true).map(r=>({...r,postUrl:r.sourcePostUrl||r.postUrl,views:r.sourceOriginalViews}));
+  }
+  function exposureRows(c){return c?.id==='article-rts'?rtOriginalRows(c):c?.rows||[];}
   // Post views, deduplicated by post ID across rows; coverage noted when partial.
   function viewsOf(objects,{scope='Post views'}={}){
     const list=objects.filter(Boolean);
@@ -296,7 +333,7 @@
     const seen=new Map();let withUrl=0,measured=0;
     // A row can carry several posts (r.postViews by post ID); each post is counted once.
     const entries=r=>r.postViews?Object.entries(r.postViews).map(([id,v])=>[id,num(v)]):[[postId(r.postUrl),num(r.views??r.xViews)]];
-    for(const c of list)for(const r of c.rows||[])for(const [id,v] of (r.posted===true?entries(r):[])){
+    for(const c of list)for(const r of exposureRows(c))for(const [id,v] of (r.posted===true?entries(r):[])){
       if(!id)continue;
       const prior=seen.get(id);
       if(!prior){withUrl++;if(v!==null)measured++;seen.set(id,{v,at:Date.parse(r.metricAt||r.xUpdated||'')||0});}
@@ -389,7 +426,8 @@
     if(key==='x-articles'){
       out.spend=addSpend([spendOf(o['x-articles']),spendOf(o['article-rts'],{noSpendReason:'No paid reposts are recorded.'})],'Articles and paid reposts');
       if(hasValue(out.spend))out.spend.parts={articles:spendOf(o['x-articles']),reposts:spendOf(o['article-rts'])};
-      out.views=viewsOf([o['x-articles']]);
+      out.views=viewsOf([o['x-articles'],o['article-rts']]);
+      if(hasValue(out.views))out.views.reason=(out.views.reason?out.views.reason+' ':'')+'Unique original article views, including originals amplified by published paid RTs. Includes organic exposure; not incremental paid impressions.';
       const c=o['x-articles'];
       const tracked=num(c?.trackedClicks);
       out.clicks=unavailable(c)?M.na(sourceReason(c,'Clicks')):tracked===null?M.na('Click storage is temporarily unavailable.'):
@@ -481,11 +519,11 @@
       const gaps=summaries.filter(s=>!hasValue(s.spend)||s.spend.state==='partial').map(s=>CAMPAIGNS.find(c=>c.key===s.key)?.name);
       spend=gaps.length?M.partial(known,'Known subtotal of recorded payments and GTA VI allocations. Not included or incomplete: '+gaps.join(', ')+'.',{chip:'Known subtotal'}):M.value(known,{reason:'Recorded payments plus GTA VI allocations, counted once.',chip:'Campaign costs'});
     }
-    const placementObjects=['x-articles','gta-qrts','gta-originals','gta-mandy','of-terms','guru-rts'].map(id=>overview?.campaigns?.find(c=>c.id===id)).filter(Boolean);
+    const placementObjects=['x-articles','article-rts','gta-qrts','gta-originals','gta-mandy','of-terms','guru-rts'].map(id=>overview?.campaigns?.find(c=>c.id===id)).filter(Boolean);
     const views=viewsOf(placementObjects);
     if(hasValue(views)){
       views.chip='Promoted post exposure';
-      views.reason=(views.reason?views.reason+' ':'')+'Deduplicated by post ID across X Articles, GTA VI, OF Terms and Guru promoted originals. Includes organic exposure; excludes the external viral originals behind purchased QRTs. This is exposure, not unique reach or paid-only impressions.';
+      views.reason=(views.reason?views.reason+' ':'')+'Deduplicated by post ID across X Articles (including paid RT originals), GTA VI, OF Terms and Guru promoted originals. Includes organic exposure; excludes the external viral originals behind purchased QRTs. This is exposure, not unique reach or paid-only impressions.';
     }
     const clicks=M.na('Click providers differ (site redirects, Short.io human clicks and OF events), so they are not added together. See each campaign.');
     return {spend,views,clicks};
@@ -503,7 +541,7 @@
   const escapeHtml=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   function safeUrl(value){try{const u=new URL(String(value||''));return u.protocol==='https:'?u.href:'';}catch{return '';}}
 
-  root.FanvueCore=Object.freeze({TZ,num,full,compact,money,moneyShort,rate,signed,londonDay,addDays,weekStart,validDay,dailySeries,weekLabel,dayShort,dayLong,stamp,
-    eventSeries,dailyEventSeries,snapshotSeries,memberWeeks,recentWeeks,memberReadings,M,hasValue,postId,spendOf,allocatedGtaSpend,isGtaRow,isGtaSource,financeEntry,financeSpend,addSpend,viewsOf,campaignSummary,homeTotals,efficiency,placementEfficiency,budgetOf,
+  root.FanvueCore=Object.freeze({TZ,num,full,compact,money,moneyShort,rate,signed,londonDay,addDays,weekStart,validDay,dailySeries,periodViewMetric,weekLabel,dayShort,dayLong,stamp,
+    eventSeries,dailyEventSeries,snapshotSeries,memberWeeks,recentWeeks,memberReadings,M,hasValue,postId,spendOf,allocatedGtaSpend,isGtaRow,isGtaSource,financeEntry,financeSpend,addSpend,viewsOf,rtOriginalRows,exposureRows,campaignSummary,homeTotals,efficiency,placementEfficiency,budgetOf,
     CAMPAIGNS,PALETTE,OUTCOME_REASON,sortRows,escapeHtml,safeUrl,notConnected,unavailable});
 })(typeof globalThis!=='undefined'?globalThis:window);

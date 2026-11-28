@@ -76,8 +76,8 @@ export function applyMetrics(placements,state,now=Date.now()){
       metricNote:failed&&lastVerifiedAt?'X stats temporarily unavailable. Showing last recorded figures.':''};
   });
 }
-export async function readMetricHistory(){
-  const storage=bucket(),entries=[],cutoff=new Date(Date.now()-91*86400000).toISOString();
+export async function readMetricHistory(storage=bucket()){
+  const entries=[],cutoff=new Date(Date.now()-91*86400000).toISOString();
   for await(const page of storage.list({prefix:'runs/',paginate:true}))entries.push(...page.blobs.filter(b=>b.key.slice(5)>=cutoff));
   const days=new Map();
   for(let i=0;i<entries.length;i+=20){

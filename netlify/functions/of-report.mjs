@@ -2,7 +2,7 @@ import {readOfPublishers,readOfEvents} from '../lib/of-report.mjs';
 import {json,getCounts} from '../lib/shared.mjs';
 import {cachedReport} from '../lib/report-cache.mjs';
 import {getStore} from '@netlify/blobs';
-import {applyMetrics,refreshMetrics,postIdentity} from '../lib/metrics.mjs';
+import {applyMetrics,refreshMetrics,postIdentity,readMetricHistory} from '../lib/metrics.mjs';
 
 export function createOfReport({readPublishers=readOfPublishers,readEvents=readOfEvents,
   metricsStore=()=>getStore({name:'fanvue-of-metrics-v1',consistency:'strong'}),
@@ -33,6 +33,7 @@ export function createOfReport({readPublishers=readOfPublishers,readEvents=readO
         }
       }
       const measured=applyMetrics(publishers,metrics);
+      const history=await readMetricHistory(storage).catch(()=>[]);
       const counts=getCounts(events),groups=new Map();
       const dateFormat=new Intl.DateTimeFormat('en-CA',{timeZone:'Europe/London',year:'numeric',month:'2-digit',day:'2-digit'});
       for(const event of events){
@@ -41,7 +42,7 @@ export function createOfReport({readPublishers=readOfPublishers,readEvents=readO
         const row=groups.get(key)||{date,code:event.code,clicks:0};row.clicks++;groups.set(key,row);
       }
       return json({ok:true,id:'C001',name:'OF Terms X Promo',ready:true,checkedAt:new Date().toISOString(),
-        ...refreshResult,metricLastSuccessfulAt:metrics.lastSuccessfulAt||null,
+        ...refreshResult,history,metricLastSuccessfulAt:metrics.lastSuccessfulAt||null,
         publishers:measured.map(p=>({...p,views:p.xViews??null,likes:p.xLikes??null,reposts:p.xShares??null,replies:p.xComments??null,...(counts[p.code]||{clicks:0,lastClick:'',firstClick:''})})),activity:[...groups.values()]});
     }catch(error){console.warn('OF report unavailable',error?.name, /^[A-Z0-9_]+$/.test(error?.code||'')?error.code:'');return json({ok:false,ready:false,error:'OF spreadsheet or verified click storage is temporarily unavailable. Please retry.'},503);}
     };

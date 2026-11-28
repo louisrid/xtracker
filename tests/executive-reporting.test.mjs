@@ -270,3 +270,18 @@ test('dated event history chooses newest snapshot rather than adding both or syn
  const a=app(ov,{dashboard:{activityReady:true,checkedAt:'2026-11-27T12:00:00Z',activity:[{code:r.code,date,clicks:2}]}});
  assert.equal(a.dashboardClickSources()[1][1].find(p=>p.week===date).value,8);
 });
+
+test('article RT originals contribute genuine promoted views once across published RTs and campaigns',()=>{
+ const direct={code:'article',postUrl:url(101),posted:true,paid:true,views:120,metricAt:'2026-11-27T12:00:00Z'};
+ const rt=(id,views,posted=true)=>({postUrl:url(id),sourcePostUrl:url(id),posted,paid:true,sourceViews:true,sourceOriginalViews:views,views,metricAt:'2026-11-27T13:00:00Z'});
+ const rtRows=[rt(101,150),rt(102,500),rt(102,500),rt(103,900,false)];
+ const ov={campaigns:[campaign('x-articles',[direct]),campaign('article-rts',rtRows),campaign('guru-rts',[{postUrl:url(102),posted:true,views:500}])]};
+ assert.equal(C.campaignSummary(ov,'x-articles').views.value,650);
+ assert.equal(C.homeTotals(ov,C.CAMPAIGNS.map(c=>C.campaignSummary(ov,c.key))).views.value,650);
+});
+test('period view totals include verified gains within a week without assigning old lifetime views to a day',()=>{
+ const rows=[{id:'A',at:'2026-11-23T12:00:00Z',views:100},{id:'A',at:'2026-11-27T12:00:00Z',views:450},{id:'B',at:'2026-11-20T12:00:00Z',views:900},{id:'B',at:'2026-11-27T12:00:00Z',views:1900},{id:'C',at:'2026-11-27T12:00:00Z',views:250}];
+ const result=C.periodViewMetric(rows,'2026-11-23','2026-11-29',{born:id=>id==='C'?Date.parse('2026-11-24T12:00:00Z'):null});
+ assert.equal(result.value,600);assert.equal(result.state,'partial');
+ assert.equal(C.dailySeries(rows,{now:Date.parse('2026-11-27T15:00:00Z')}).gained.find(p=>p.week==='2026-11-27').value,null);
+});

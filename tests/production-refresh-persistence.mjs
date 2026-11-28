@@ -5,7 +5,7 @@ const pause=ms=>new Promise(r=>setTimeout(r,ms));
 const busy=j=>j&&['queued','running'].includes(j.state);
 async function status(){const r=await fetch(endpoint,{cache:'no-store',signal:AbortSignal.timeout(12000)});if(!r.ok)throw Error('Refresh API '+r.status);return (await r.json()).refresh;}
 let ready=false;
-for(let i=0;i<50;i++){try{const r=await fetch(base+'/?qa='+Date.now(),{cache:'no-store',signal:AbortSignal.timeout(10000)});if((await r.text()).includes('20261128-click-reconciliation-v67')){await status();ready=true;break;}}catch{}await pause(3000);}
+for(let i=0;i<50;i++){try{const r=await fetch(base+'/?qa='+Date.now(),{cache:'no-store',signal:AbortSignal.timeout(10000)});if((await r.text()).includes('20261128-verified-exposure-v68')){await status();ready=true;break;}}catch{}await pause(3000);}
 assert.ok(ready,'new production version and refresh endpoint available');
 const browser=await chromium.launch({headless:true,executablePath:process.env.CHROME_BIN||undefined,args:['--no-sandbox']});
 let ctx,page,posts=0;

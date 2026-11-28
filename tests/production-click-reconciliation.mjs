@@ -3,7 +3,7 @@ import {chromium} from 'playwright';
 const base='https://elegant-swan-98c20a.netlify.app',fn=base+'/.netlify/functions/',sleep=ms=>new Promise(r=>setTimeout(r,ms));
 const read=async n=>{const r=await fetch(fn+n,{cache:'no-store',redirect:'error',signal:AbortSignal.timeout(120000)});assert.ok(r.ok,n+' '+r.status);return r.json()};
 let ready=false;
-for(let i=0;i<40;i++){try{const r=await fetch(base+'/?qa='+Date.now(),{cache:'no-store'});if((await r.text()).includes('20261128-click-reconciliation-v67')){ready=true;break}}catch{}await sleep(3000)}
+for(let i=0;i<40;i++){try{const r=await fetch(base+'/?qa='+Date.now(),{cache:'no-store'});if((await r.text()).includes('20261128-verified-exposure-v68')){ready=true;break}}catch{}await sleep(3000)}
 assert.ok(ready,'new production version');
 const [g,d,o]=await Promise.all([read('gta-report'),read('dashboard'),read('of-report')]);
 const londonDay=t=>new Intl.DateTimeFormat('en-CA',{timeZone:'Europe/London',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(t));

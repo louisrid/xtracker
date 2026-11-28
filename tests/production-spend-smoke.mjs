@@ -6,7 +6,7 @@ const base='https://elegant-swan-98c20a.netlify.app';
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 let ready=false;
 for(let i=0;i<25;i++){
- try{const r=await fetch(base+'/?qa='+Date.now(),{cache:'no-store',signal:AbortSignal.timeout(12000)});ready=r.ok&&(await r.text()).includes('20261128-click-reconciliation-v67');if(ready)break;}catch{}
+ try{const r=await fetch(base+'/?qa='+Date.now(),{cache:'no-store',signal:AbortSignal.timeout(12000)});ready=r.ok&&(await r.text()).includes('20261128-verified-exposure-v68');if(ready)break;}catch{}
  await sleep(3000);
 }
 assert.ok(ready,'Latest production HTML must be published before checking spend');
