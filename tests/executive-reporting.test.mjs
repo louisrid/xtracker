@@ -285,3 +285,11 @@ test('period view totals include verified gains within a week without assigning 
  assert.equal(result.value,600);assert.equal(result.state,'partial');
  assert.equal(C.dailySeries(rows,{now:Date.parse('2026-11-27T15:00:00Z')}).gained.find(p=>p.week==='2026-11-27').value,null);
 });
+
+test('weekly live posts count actual paid publications, not the originals linked by repost bookings',()=>{
+ const id=String((BigInt(Date.parse('2026-11-27T12:00:00Z')-1288834974657)<<22n)+1n);
+ const original=String((BigInt(Date.parse('2026-11-27T13:00:00Z')-1288834974657)<<22n)+1n);
+ const ov={campaigns:[campaign('x-articles',[{code:'paid-own',posted:true,paid:true,postUrl:url(id),cost:100}]),campaign('article-rts',[{id:'paid-rt',posted:true,paid:true,postUrl:url(original),sourcePostUrl:url(original),sourceViews:true,sourceOriginalViews:800,cost:30}])]};
+ const m=app(ov).periodTotals('2026-11-23','2026-11-29');
+ assert.equal(m.posts.value,1);assert.equal(C.campaignSummary(ov,'x-articles').views.value,800);
+});

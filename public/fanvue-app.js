@@ -372,7 +372,7 @@
     const spendOnly=financeOnly||(records?[]:igSpendRecords());
     const spend=C.financeSpend([...all,...spendOnly].map(financeEntry),{from,to}),posts=new Set();
     for(const x of all){
-      if(actualPaid(x)&&x.live===true&&x.platform==='X')for(const id of postIdsOfRecord(x)){const t=postBorn(id),d=t?C.londonDay(t):'';if(d>=from&&d<=to)posts.add(id);}
+      if(actualPaid(x)&&x.live===true&&x.platform==='X'&&x.type!=='RT')for(const id of postIdsOfRecord(x)){const t=postBorn(id),d=t?C.londonDay(t):'';if(d>=from&&d<=to)posts.add(id);}
     }
     const history=xHistory(all,{includeGuru:!records});
     return {clicks:records?M.na('Scoped clicks are calculated separately.'):clickBreakdown(from,to),
