@@ -1,0 +1,13 @@
+name: Read-only click audit
+on:
+  push:
+    branches: [audit-clicks-20261127]
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - run: node tests/read-only-click-audit.mjs
